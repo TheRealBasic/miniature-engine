@@ -9,6 +9,9 @@
   const CANVAS = document.getElementById("c");
   const ctx = CANVAS.getContext("2d");
   ctx.imageSmoothingEnabled = false;
+  ctx.mozImageSmoothingEnabled = false;
+  ctx.webkitImageSmoothingEnabled = false;
+  CANVAS.style.imageRendering = "pixelated";
 
   let screenScale = 3;          // integer on-screen scale
   let renderScale = screenScale * (window.devicePixelRatio || 1);
@@ -27,6 +30,8 @@
     CANVAS.style.width  = `${VIEW_W * screenScale}px`;
     CANVAS.style.height = `${VIEW_H * screenScale}px`;
     ctx.imageSmoothingEnabled = false;
+    ctx.mozImageSmoothingEnabled = false;
+    ctx.webkitImageSmoothingEnabled = false;
   }
 
   addEventListener("resize", resizeCanvas);
@@ -38,11 +43,17 @@
   off.height = VIEW_H;
   const g = off.getContext("2d");
   g.imageSmoothingEnabled = false;
+  g.mozImageSmoothingEnabled = false;
+  g.webkitImageSmoothingEnabled = false;
 
   // ====== Palette sampled/approximated from your reference image ======
   const PAL = {
-    sky:        "#48a8a8", // 72,168,168
-    skyDark:    "#388080", // 56,128,128
+    sky:        "#78c4d6",
+    skyDark:    "#4c94a8",
+    waterDeep:  "#245a7a",
+    water:      "#357ca0",
+    waveFoam:   "#d4f1ff",
+    waveShadow: "#1f4b67",
     cloud1:     "#f8f8f0",
     cloud2:     "#e0e8c8",
     cloud3:     "#d8d0b8",
@@ -285,7 +296,7 @@
   function idx(x,y){ return y*MAP_W + x; }
   function inb(x,y){ return x>=0 && y>=0 && x<MAP_W && y<MAP_H; }
 
-  // Handcrafted-ish island shape resembling your reference (big left mass + right top ledge + small pillars)
+  // Handcrafted-ish island shape resembling your reference (single landmass with a top ledge)
   function paintRect(x0,y0,w,h,val=1){
     for(let y=y0;y<y0+h;y++) for(let x=x0;x<x0+w;x++) if(inb(x,y)) ground[idx(x,y)] = val;
   }
@@ -315,12 +326,26 @@
   carveCircle(14,17,3);
   carveCircle(22,29,4);
 
-  // small floating pillars
-  paintRect(10,9, 2,2, 1);
-  paintRect(52,22, 2,2, 1);
-
   // Ensure walkable continuity
   function isGround(x,y){ return inb(x,y) && ground[idx(x,y)] === 1; }
+
+  // Coastline cache for animated foam
+  const coast = [];
+  function rebuildCoast(){
+    coast.length = 0;
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for(let y=0;y<MAP_H;y++){
+      for(let x=0;x<MAP_W;x++){
+        if(!isGround(x,y)) continue;
+        for(const [dx,dy] of dirs){
+          if(!isGround(x+dx, y+dy)){
+            coast.push({x, y, dx, dy});
+          }
+        }
+      }
+    }
+  }
+  rebuildCoast();
 
   // Decor placements (trees, rocks, mushrooms) stored separately
   const deco = new Map(); // key "x,y" -> {type, solid, pickup}
@@ -397,8 +422,9 @@
     if(state.toast.length>4) state.toast.shift();
   }
 
-  function openDialog(lines, onClose=null){
-    state.msg = {lines, t: 0, done: false, onClose};
+  function openDialog(lines, opts={}){
+    const {onClose=null, blockInput=true, autoCloseOnMove=false} = opts;
+    state.msg = {lines, t: 0, done: false, onClose, blockInput, autoCloseOnMove};
   }
 
   // ====== Simple sound (optional) ======
@@ -597,7 +623,7 @@
         "You opened the chest!",
         "+12 coins.",
         "(Coins don't do much... yet.)"
-      ], ()=>{ save(); });
+      ], {onClose: ()=>{ save(); }});
       beep(520, 0.05, "square", 0.03);
       beep(780, 0.06, "triangle", 0.03);
       return;
@@ -612,7 +638,7 @@
           "I swear they grow only where the sky is calm.",
           "",
           "(Pick mushrooms with E, then come back.)"
-        ], ()=>{ npc.quest.state = 1; save(); });
+        ], {onClose: ()=>{ npc.quest.state = 1; save(); }});
         return;
       }
       if(npc.quest.state === 1){
@@ -621,7 +647,7 @@
             `${npc.name}: You found them! Magnificent.`,
             "As promised — a blessing of stamina.",
             "+2 Max HP."
-          ], ()=>{
+          ], {onClose: ()=>{
             player.inv.mush -= 3;
             player.maxHp += 2;
             player.hp = Math.min(player.hp+2, player.maxHp);
@@ -630,7 +656,7 @@
             beep(880, 0.07, "triangle", 0.03);
             beep(1320, 0.07, "triangle", 0.03);
             save();
-          });
+          }});
         }else{
           openDialog([
             `${npc.name}: Still short.`,
@@ -652,9 +678,9 @@
   for(let i=0;i<14;i++){
     clouds.push({
       x: rnd(-120, VIEW_W+120),
-      y: rnd(8, 90),
-      s: rnd(0.25, 1.0),
-      sp: rnd(3, 10),
+      y: rnd(-12, 48),
+      s: rnd(0.35, 1.0),
+      sp: rnd(4, 12),
       p: Math.random()
     });
   }
@@ -682,15 +708,58 @@
     g.drawImage(atlas, s.x, s.y, s.w, s.h, x, y, s.w, s.h);
   }
 
-  function drawWorld(){
-    // sky base
-    g.fillStyle = PAL.sky;
-    g.fillRect(0,0,VIEW_W,VIEW_H);
+  function drawWaterTile(tx, ty, camX, camY){
+    const sx = tx*TILE - camX;
+    const sy = ty*TILE - camY;
+    const phase = state.time*1.7 + tx*0.9 + ty*0.55;
+    g.fillStyle = PAL.waterDeep;
+    g.fillRect(sx, sy, TILE, TILE);
+    g.fillStyle = PAL.waveShadow;
+    g.fillRect(sx, sy + 10 + Math.sin(phase)*1.4, TILE, 2);
+    g.fillStyle = PAL.water;
+    g.fillRect(sx, sy + 4 + Math.sin(phase*0.7)*2, TILE, 4);
+    g.fillStyle = PAL.waveFoam;
+    g.fillRect(sx, sy + 2 + Math.sin(phase)*2, TILE, 1);
+  }
 
-    // drifting clouds
+  function drawFoam(camX, camY){
+    g.fillStyle = PAL.waveFoam;
+    g.globalAlpha = 0.85;
+    for(const edge of coast){
+      const sx = edge.x*TILE - camX;
+      const sy = edge.y*TILE - camY;
+      const wobble = Math.sin(state.time*3 + edge.x*0.7 + edge.y*0.5);
+      if(edge.dy === 1){
+        g.fillRect((sx+1)|0, (sy+TILE-2 + wobble*1.6)|0, TILE-2, 3);
+      }else if(edge.dy === -1){
+        g.fillRect((sx+1)|0, (sy-1 + wobble*1.2)|0, TILE-2, 3);
+      }else if(edge.dx === 1){
+        g.fillRect((sx+TILE-2 + wobble*1.2)|0, (sy+2)|0, 3, TILE-4);
+      }else if(edge.dx === -1){
+        g.fillRect((sx-1 + wobble*1.2)|0, (sy+2)|0, 3, TILE-4);
+      }
+    }
+    g.globalAlpha = 1;
+  }
+
+  function drawWorld(){
+    // water base (animated ripples to read as ocean)
+    const waterGrad = g.createLinearGradient(0,0,0,VIEW_H);
+    waterGrad.addColorStop(0, PAL.sky);
+    waterGrad.addColorStop(0.35, PAL.water);
+    waterGrad.addColorStop(1, PAL.waterDeep);
+    g.fillStyle = waterGrad;
+    g.fillRect(0,0,VIEW_W,VIEW_H);
+    g.fillStyle = "rgba(255,255,255,0.035)";
+    for(let y=0;y<VIEW_H;y+=6){
+      const offset = Math.sin(state.time*1.6 + y*0.12) * 6;
+      g.fillRect((offset|0)-12, y, VIEW_W+24, 1);
+    }
+
+    // drifting clouds above the island
     for(const cl of clouds){
-      const x = (cl.x - state.cam.x*0.02) | 0;
-      const y = (cl.y - state.cam.y*0.02) | 0;
+      const x = (cl.x - state.cam.x*0.04) | 0;
+      const y = ((cl.y - state.cam.y*0.04) - 14) | 0;
       drawCloud(x, y, cl.s, (cl.p*3)|0);
     }
 
@@ -703,7 +772,7 @@
     const endTx   = clamp(Math.floor((camX+VIEW_W) / TILE)+3, 0, MAP_W);
     const endTy   = clamp(Math.floor((camY+VIEW_H) / TILE)+3, 0, MAP_H);
 
-    // First pass: draw cliff faces on void tiles adjacent to ground, then grass.
+    // First pass: draw animated water tiles, then grass.
     for(let ty=startTy; ty<endTy; ty++){
       for(let tx=startTx; tx<endTx; tx++){
         const sx = tx*TILE - camX;
@@ -712,34 +781,15 @@
         const here = isGround(tx,ty);
 
         if(!here){
-          // if any neighbor is ground, draw cliff face (like the reference "walls")
-          const nG = isGround(tx,ty-1);
-          const sG = isGround(tx,ty+1);
-          const wG = isGround(tx-1,ty);
-          const eG = isGround(tx+1,ty);
-          if(nG || sG || wG || eG){
-            // Make cliff face only when there's ground above (so it looks like hanging edge)
-            if(nG) drawSpr("cliffFace", sx|0, sy|0);
-          }
+          drawWaterTile(tx, ty, camX, camY);
         } else {
           drawSpr("grass", sx|0, sy|0);
         }
       }
     }
 
-    // Second pass: edge foam-ish highlight where ground meets void (tiny pixel accent)
-    g.fillStyle = "rgba(240,255,255,0.30)";
-    for(let ty=startTy; ty<endTy; ty++){
-      for(let tx=startTx; tx<endTx; tx++){
-        if(!isGround(tx,ty)) continue;
-        // if neighbor below is void => draw a faint lip at bottom
-        if(!isGround(tx,ty+1)){
-          const sx = tx*TILE - camX;
-          const sy = ty*TILE - camY;
-          g.fillRect((sx+1)|0, (sy+TILE-1)|0, (TILE-2)|0, 1);
-        }
-      }
-    }
+    // Coast foam
+    drawFoam(camX, camY);
 
     // Deco
     for(let ty=startTy; ty<endTy; ty++){
@@ -968,6 +1018,15 @@
       return;
     }
 
+    // movement intent captured even if a dialog is up (for auto-close)
+    let ax = 0, ay = 0;
+    if(down("ArrowLeft")||down("KeyA")) ax -= 1;
+    if(down("ArrowRight")||down("KeyD")) ax += 1;
+    if(down("ArrowUp")||down("KeyW")) ay -= 1;
+    if(down("ArrowDown")||down("KeyS")) ay += 1;
+    const running = down("ShiftLeft") || down("ShiftRight");
+    const spd = running ? player.run : player.spd;
+
     // Dialog interactions
     if(state.msg){
       if(pressedOnce("KeyE") || pressedOnce("Space")){
@@ -982,6 +1041,12 @@
           if(cb) cb();
           beep(420,0.03,"square",0.02);
         }
+      } else if(state.msg.autoCloseOnMove && (ax || ay)){
+        // let the first movement close the intro pop so players can move immediately
+        const cb = state.msg.onClose;
+        state.msg = null;
+        if(cb) cb();
+        beep(420,0.03,"square",0.02);
       }
       // still animate clouds even if dialog open
     }
@@ -992,17 +1057,8 @@
       if(cl.x > VIEW_W + 140) cl.x = -160;
     }
 
-    // Player input (if no dialog)
-    if(!state.msg){
-      let ax = 0, ay = 0;
-      if(down("ArrowLeft")||down("KeyA")) ax -= 1;
-      if(down("ArrowRight")||down("KeyD")) ax += 1;
-      if(down("ArrowUp")||down("KeyW")) ay -= 1;
-      if(down("ArrowDown")||down("KeyS")) ay += 1;
-
-      const running = down("ShiftLeft") || down("ShiftRight");
-      const spd = running ? player.run : player.spd;
-
+    // Player input (if dialog allows movement)
+    if(!state.msg || !state.msg.blockInput){
       if(ax || ay){
         updateFacing(ax, ay);
       }
@@ -1083,6 +1139,8 @@
 
     // upscale to screen
     ctx.imageSmoothingEnabled = false;
+    ctx.mozImageSmoothingEnabled = false;
+    ctx.webkitImageSmoothingEnabled = false;
     ctx.clearRect(0,0,CANVAS.width,CANVAS.height);
     ctx.drawImage(off, 0,0,VIEW_W,VIEW_H, 0,0,CANVAS.width,CANVAS.height);
 
@@ -1092,11 +1150,11 @@
 
   // Little welcome
   openDialog([
-    "You step onto a floating island...",
-    "Clouds drift below like an endless sea.",
+    "You step onto a wind-washed isle...",
+    "Waves crash softly against the rocks.",
     "",
     "Find the knight and help him.",
     "(WASD • E interact • J attack)"
-  ]);
+  ], {blockInput:false, autoCloseOnMove:true});
 
 })();
