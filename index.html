@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sky Island RPG</title>
+  <style>
+    :root{
+      --ui: rgba(10,20,20,.55);
+      --ui2: rgba(10,20,20,.35);
+      --text: #eaffff;
+      --muted: rgba(234,255,255,.75);
+      --accent: rgba(220,255,180,.95);
+    }
+    html,body{height:100%; margin:0; background:#48a8a8; font-family: system-ui, Segoe UI, Roboto, Arial;}
+    #wrap{height:100%; display:grid; place-items:center;}
+    canvas{width:min(1200px, 100vw); height:auto; image-rendering: pixelated; image-rendering: crisp-edges;}
+    #hint{
+      position:fixed; left:12px; bottom:12px; padding:10px 12px;
+      color:var(--muted); background:var(--ui2); border:1px solid rgba(255,255,255,.12);
+      border-radius:12px; backdrop-filter: blur(6px);
+      font-size:13px; line-height:1.25;
+      max-width:min(540px, 92vw);
+    }
+    #hint b{color:var(--text)}
+  </style>
+</head>
+<body>
+  <div id="wrap"><canvas id="c" width="960" height="540"></canvas></div>
+  <div id="hint">
+    <b>Sky Island RPG</b> — WASD/Arrows move • Shift run • <b>J</b> attack • <b>E</b> interact • Esc pause<br/>
+    Quest: talk to the knight and bring <b>3 red mushrooms</b>.
+  </div>
+  <script src="./game.js"></script>
+</body>
+</html>
