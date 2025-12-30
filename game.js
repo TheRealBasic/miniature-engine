@@ -3,15 +3,34 @@
 
   // ====== Config ======
   const TILE = 16;              // sprite tile size (internal)
-  const SCALE = 3;              // upscaling factor for canvas pixels
   const VIEW_W = 320;           // internal resolution
   const VIEW_H = 180;
 
   const CANVAS = document.getElementById("c");
-  CANVAS.width  = VIEW_W * SCALE;
-  CANVAS.height = VIEW_H * SCALE;
   const ctx = CANVAS.getContext("2d");
   ctx.imageSmoothingEnabled = false;
+
+  let screenScale = 3;          // integer on-screen scale
+  let renderScale = screenScale * (window.devicePixelRatio || 1);
+
+  function resizeCanvas(){
+    const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+    const fitScale = Math.max(
+      1,
+      Math.floor(Math.min(window.innerWidth / VIEW_W, window.innerHeight / VIEW_H))
+    );
+    screenScale = Math.max(1, fitScale);
+    renderScale = screenScale * dpr;
+
+    CANVAS.width  = Math.round(VIEW_W * renderScale);
+    CANVAS.height = Math.round(VIEW_H * renderScale);
+    CANVAS.style.width  = `${VIEW_W * screenScale}px`;
+    CANVAS.style.height = `${VIEW_H * screenScale}px`;
+    ctx.imageSmoothingEnabled = false;
+  }
+
+  addEventListener("resize", resizeCanvas);
+  resizeCanvas();
 
   // Offscreen for pixel-perfect drawing then upscale
   const off = document.createElement("canvas");
@@ -1065,7 +1084,7 @@
     // upscale to screen
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0,0,CANVAS.width,CANVAS.height);
-    ctx.drawImage(off, 0,0,VIEW_W,VIEW_H, 0,0,VIEW_W*SCALE,VIEW_H*SCALE);
+    ctx.drawImage(off, 0,0,VIEW_W,VIEW_H, 0,0,CANVAS.width,CANVAS.height);
 
     requestAnimationFrame(frame);
   }
