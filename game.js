@@ -56,14 +56,43 @@
 
   // ====== Input ======
   const key = new Map();
-  addEventListener("keydown", e => { key.set(e.code, true); if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].includes(e.code)) e.preventDefault(); });
-  addEventListener("keyup",   e => { key.set(e.code, false); });
+  const INPUT_KEYS = new Set([
+    "ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space",
+    "KeyW","KeyA","KeyS","KeyD","KeyJ","KeyE","ShiftLeft","ShiftRight"
+  ]);
 
-  const down = (code) => !!key.get(code);
+  function recordKey(e, isDown){
+    // Opera GX sometimes omits KeyboardEvent.code; fall back to key/id variants.
+    const names = new Set([e.code]);
+    if(e.key){
+      const upper = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+      names.add(e.key);
+      names.add(upper);
+      if(/^[A-Z]$/.test(upper)) names.add(`Key${upper}`);
+    }
+    for(const name of names){
+      if(name) key.set(name, isDown);
+    }
+    if(INPUT_KEYS.has(e.code) || INPUT_KEYS.has(e.key) || INPUT_KEYS.has(`Key${e.key?.toUpperCase?.()||""}`)){
+      e.preventDefault();
+    }
+  }
+
+  addEventListener("keydown", e => recordKey(e, true));
+  addEventListener("keyup",   e => recordKey(e, false));
+
+  const down = (code) => {
+    if(key.get(code)) return true;
+    if(code.startsWith("Key")){
+      const letter = code.slice(3);
+      return !!(key.get(letter) || key.get(letter.toLowerCase()) || key.get(letter.toUpperCase()));
+    }
+    return !!key.get(code.replace("Arrow",""));
+  };
   const pressedOnce = (() => {
     const prev = new Map();
     return (code) => {
-      const now = !!key.get(code);
+      const now = down(code);
       const was = !!prev.get(code);
       prev.set(code, now);
       return now && !was;
