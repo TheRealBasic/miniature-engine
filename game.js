@@ -296,7 +296,7 @@
   function idx(x,y){ return y*MAP_W + x; }
   function inb(x,y){ return x>=0 && y>=0 && x<MAP_W && y<MAP_H; }
 
-  // Handcrafted-ish island shape resembling your reference (single landmass with a top ledge)
+  // Handcrafted-ish island shape with a central hub clearing
   function paintRect(x0,y0,w,h,val=1){
     for(let y=y0;y<y0+h;y++) for(let x=x0;x<x0+w;x++) if(inb(x,y)) ground[idx(x,y)] = val;
   }
@@ -311,20 +311,20 @@
   }
 
   // base masses
-  paintRect(5,18, 28, 14, 1);     // main lower-left island
-  paintRect(22,12, 18, 14, 1);    // mid island extension
-  paintRect(30,10, 12, 9, 1);     // top-right platform
-  paintRect(34,20, 10, 8, 1);     // right-mid platform
+  paintRect(10,16, 30, 15, 1);    // central landmass
+  paintRect(22,10, 18, 9, 1);     // top plateau
+  paintRect(34,20, 12, 10, 1);    // right wing
+  paintRect(14,24, 10, 8, 1);     // lower-left belly
 
   // shape edges (carves)
-  carveCircle(5,18,4);
-  carveCircle(6,32,6);
-  carveCircle(20,18,3);
-  carveCircle(41,10,4);
-  carveCircle(43,28,5);
-  carveCircle(28,33,6);
-  carveCircle(14,17,3);
-  carveCircle(22,29,4);
+  carveCircle(10,16,4);
+  carveCircle(12,31,6);
+  carveCircle(22,16,3);
+  carveCircle(40,11,4);
+  carveCircle(43,29,5);
+  carveCircle(30,34,6);
+  carveCircle(16,18,3);
+  carveCircle(24,29,4);
 
   // Ensure walkable continuity
   function isGround(x,y){ return inb(x,y) && ground[idx(x,y)] === 1; }
@@ -356,30 +356,32 @@
     deco.set(keyXY(x,y), {type, solid, pickup});
   }
 
-  // Trees like the reference
+  // Trees framing a central hub clearing
   [
-    [8,26],[10,27],[12,26],[14,25],[16,26],
-    [20,24],[24,22],[27,24],
-    [33,13],[35,14],[36,15],
-    [36,22],[38,21],[40,22]
+    [12,26],[14,22],[16,30],[18,20],[20,28],
+    [22,18],[24,16],[28,16],[30,18],
+    [32,22],[34,26],[36,20],[38,24],[40,18],
+    [42,26]
   ].forEach(([x,y])=>placeDeco(x,y,"tree", true, false));
 
-  // Rocks
-  [[18,25],[25,26],[28,22],[31,24],[39,24]].forEach(([x,y])=>placeDeco(x,y,"rock", true, false));
+  // Rocks pushed toward the coasts
+  [[14,32],[20,32],[28,32],[36,28],[40,22]].forEach(([x,y])=>placeDeco(x,y,"rock", true, false));
 
-  // Mushrooms (quest pickups)
-  [[12,29],[15,29],[26,24],[29,23],[37,25],[41,23]].forEach(([x,y])=>placeDeco(x,y,"mushroom", false, true));
+  // Mushrooms (quest pickups) clustered off the hub
+  [[14,28],[18,32],[24,30],[30,26],[34,30],[40,24]].forEach(([x,y])=>placeDeco(x,y,"mushroom", false, true));
 
-  // Chest
-  placeDeco(24,19,"chest", true, false);
+  // Chest set near the plateau
+  placeDeco(28,15,"chest", true, false);
 
   // ====== Entities ======
   const ENT = [];
   function addEntity(e){ ENT.push(e); return e; }
 
+  const HUB_SPAWN = {x: 26*TILE, y: 24*TILE};
+
   const player = addEntity({
     kind:"player",
-    x: 18*TILE, y: 26*TILE,
+    x: HUB_SPAWN.x, y: HUB_SPAWN.y,
     vx:0, vy:0,
     spd: 52, run: 82,
     facing: {x:1,y:0},
@@ -399,7 +401,7 @@
 
   const slime = addEntity({
     kind:"slime",
-    x: 26*TILE, y: 23*TILE,
+    x: 34*TILE, y: 24*TILE,
     hp: 6, maxHp: 6,
     t: 0,
     dir: {x:1,y:0},
@@ -452,7 +454,7 @@
   }
 
   // ====== Save/Load ======
-  const SAVE_KEY = "sky_island_rpg_save_v1";
+  const SAVE_KEY = "sky_island_rpg_save_v2";
   function save(){
     const s = {
       x: player.x, y: player.y,
@@ -1108,7 +1110,7 @@
           beep(160,0.06,"sawtooth",0.03);
           if(player.hp <= 0){
             player.hp = player.maxHp;
-            player.x = 18*TILE; player.y = 26*TILE;
+            player.x = HUB_SPAWN.x; player.y = HUB_SPAWN.y;
             toast("You wake up back on the grass...");
             beep(220,0.08,"triangle",0.03);
             save();
