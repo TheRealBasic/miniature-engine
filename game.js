@@ -367,8 +367,8 @@
   // Rocks pushed toward the coasts
   [[14,32],[20,32],[28,32],[36,28],[40,22]].forEach(([x,y])=>placeDeco(x,y,"rock", true, false));
 
-  // Mushrooms (quest pickups) clustered off the hub
-  [[14,28],[18,32],[24,30],[30,26],[34,30],[40,24]].forEach(([x,y])=>placeDeco(x,y,"mushroom", false, true));
+  // Mushrooms (quest pickups) on accessible grass tiles
+  [[16,26],[18,27],[28,28],[30,26],[36,24],[40,24]].forEach(([x,y])=>placeDeco(x,y,"mushroom", false, true));
 
   // Chest set near the plateau
   placeDeco(28,15,"chest", true, false);
