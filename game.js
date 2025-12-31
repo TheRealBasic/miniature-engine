@@ -5,6 +5,9 @@
   const TILE = 16;              // sprite tile size (internal)
   const VIEW_W = 320;           // internal resolution
   const VIEW_H = 180;
+  const DASH_CD = 1.65;
+  const DASH_TIME = 0.22;
+  const DASH_SPEED = 200;
 
   const CANVAS = document.getElementById("c");
   const ctx = CANVAS.getContext("2d");
@@ -74,6 +77,12 @@
     mushRed:    "#d85a5a",
     mushRed2:   "#b84545",
     mushDot:    "#f1e9db",
+    shard:      "#b9d6ff",
+    shard2:     "#7da5f2",
+    beacon:     "#f2d27a",
+    beacon2:    "#f7f3d4",
+    feather:    "#f8f2e0",
+    feather2:   "#e0d4b4",
     ui:         "rgba(10,20,20,.70)"
   };
 
@@ -88,7 +97,7 @@
   const key = new Map();
   const INPUT_KEYS = new Set([
     "ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space",
-    "KeyW","KeyA","KeyS","KeyD","KeyJ","KeyE","ShiftLeft","ShiftRight"
+    "KeyW","KeyA","KeyS","KeyD","KeyJ","KeyK","KeyE","ShiftLeft","ShiftRight"
   ]);
 
   function recordKey(e, isDown){
@@ -289,6 +298,56 @@
     outlineBox(4,9,8,5,PAL.outline);
   });
 
+  // Sky shard (quest pickup)
+  addSprite("shard", TILE, TILE, ()=>{
+    pxRect("rgba(0,0,0,0)", 0,0,TILE,TILE);
+    pxRect(PAL.shard2, 6,4, 4,8);
+    pxRect(PAL.shard,  7,3, 3,8);
+    pxDot(PAL.beacon2, 8,4);
+    outlineBox(6,3,5,10, PAL.outline);
+  });
+
+  // Beacon (ritual brazier)
+  addSprite("beacon", TILE, TILE, ()=>{
+    pxRect("rgba(0,0,0,0)", 0,0,TILE,TILE);
+    pxRect("#4b3b28", 4,9, 8,5); // base
+    pxRect("#7a5b3a", 4,10, 8,2);
+    pxRect("#c0aa7a", 6,7, 4,3); // bowl
+    pxRect("#8b754e", 6,8, 4,1);
+    pxDot(PAL.beacon2, 8,6);
+    outlineBox(4,7,8,7,PAL.outline);
+  });
+
+  // Harpy (flying enemy)
+  addSprite("harpy", TILE, TILE, ()=>{
+    pxRect("rgba(0,0,0,0)", 0,0,TILE,TILE);
+    pxRect("#c8d6da", 6,8,4,5); // body
+    pxRect("#9fb3b8", 6,12,4,2);
+    pxRect(PAL.feather2, 3,8, 4,6); // wing left
+    pxRect(PAL.feather,  9,8, 4,6); // wing right
+    pxRect("#f7f3d4", 7,5, 3,3); // head
+    pxDot("#203838", 8,6);
+    outlineBox(3,4,10,10, PAL.outline);
+  });
+
+  // Feather projectile
+  addSprite("featherProj", TILE, TILE, ()=>{
+    pxRect("rgba(0,0,0,0)",0,0,TILE,TILE);
+    pxRect(PAL.feather, 6,7, 4,2);
+    pxRect(PAL.feather2, 5,8, 4,2);
+    outlineBox(5,7,6,3, PAL.outline);
+  });
+
+  // Forge (crafting station)
+  addSprite("forge", TILE, TILE, ()=>{
+    pxRect("rgba(0,0,0,0)", 0,0,TILE,TILE);
+    pxRect("#4a4a52", 3,9, 10,5);
+    pxRect("#60606c", 3,10,10,2);
+    pxRect("#d26c2c", 5,8, 6,2); // embers
+    pxDot("#f4d7aa", 7,7);
+    outlineBox(3,7,10,7, PAL.outline);
+  });
+
   // ====== World Map ======
   const MAP_W = 64, MAP_H = 36;
   const ground = new Uint8Array(MAP_W * MAP_H); // 0 void, 1 grass
@@ -370,8 +429,17 @@
   // Mushrooms (quest pickups) on accessible grass tiles
   [[16,26],[18,27],[28,28],[30,26],[36,24],[40,24]].forEach(([x,y])=>placeDeco(x,y,"mushroom", false, true));
 
+  // Sky shards scattered farther out
+  [[12,30],[24,12],[42,28],[18,18]].forEach(([x,y])=>placeDeco(x,y,"shard", false, true));
+
   // Chest set near the plateau
   placeDeco(28,15,"chest", true, false);
+
+  // Ancient beacon near the cliff edge
+  placeDeco(22,12,"beacon", true, false);
+
+  // Forge for glider crafting
+  placeDeco(24,14,"forge", true, false);
 
   // ====== Entities ======
   const ENT = [];
@@ -387,16 +455,19 @@
     facing: {x:1,y:0},
     hp: 10, maxHp: 10,
     xp: 0, lvl: 1,
-    inv: { mush: 0, coin: 0 },
+    inv: { mush: 0, coin: 0, shard: 0, feather: 0 },
     atkCD: 0,
-    iCD: 0
+    iCD: 0,
+    dash: 0,
+    dashCD: 0,
+    glider: false
   });
 
   const npc = addEntity({
     kind:"npc",
     x: 38*TILE, y: 14*TILE,
     name:"Sir Cloudrick",
-    quest: { state: 0 }, // 0 not started, 1 started, 2 done
+    quest: { state: 0 }, // 0 intro, 1 mushroom quest, 2 legacy complete, 3 beacon quest, 4 beacon done, 5 harpy task, 6 finished
   });
 
   const slime = addEntity({
@@ -408,6 +479,14 @@
     hurt: 0
   });
 
+  const harpies = [
+    addEntity({kind:"harpy", x: 14*TILE, y: 12*TILE, hp: 7, maxHp: 7, t:0, dir:{x:1,y:0}, hurt:0, shoot:0, alive:true}),
+    addEntity({kind:"harpy", x: 42*TILE, y: 18*TILE, hp: 7, maxHp: 7, t:0, dir:{x:-1,y:0}, hurt:0, shoot:0, alive:true}),
+    addEntity({kind:"harpy", x: 30*TILE, y: 30*TILE, hp: 7, maxHp: 7, t:0, dir:{x:0,y:1}, hurt:0, shoot:0, alive:true}),
+  ];
+
+  const projectiles = [];
+
   // ====== Dialog / UI state ======
   const state = {
     time: 0,
@@ -416,6 +495,8 @@
     msg: null,        // {lines, t, done, onClose}
     toast: [],        // quick text popups
     chestOpened: false,
+    beaconLit: false,
+    harpiesCleared: false,
     soundOn: true,
   };
 
@@ -463,8 +544,12 @@
       inv: player.inv,
       quest: npc.quest.state,
       chestOpened: state.chestOpened,
+      beaconLit: state.beaconLit,
+      harpiesCleared: state.harpiesCleared,
+      glider: player.glider,
       // mushrooms picked: remove from deco
       picked: [...deco.entries()].filter(([k,v])=>v.type==="mushroom" && v.picked).map(([k])=>k),
+      shardsPicked: [...deco.entries()].filter(([k,v])=>v.type==="shard" && v.picked).map(([k])=>k),
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(s));
   }
@@ -477,14 +562,29 @@
       player.hp=s.hp; player.maxHp=s.maxHp;
       player.xp=s.xp; player.lvl=s.lvl;
       player.inv=s.inv || player.inv;
+      if(player.inv.shard == null) player.inv.shard = 0;
+      if(player.inv.feather == null) player.inv.feather = 0;
       npc.quest.state = s.quest ?? 0;
       state.chestOpened = !!s.chestOpened;
+      state.beaconLit = !!s.beaconLit;
+      state.harpiesCleared = !!s.harpiesCleared;
+      player.glider = !!s.glider;
       // Mark mushrooms as picked
       if(Array.isArray(s.picked)){
         for(const k of s.picked){
           const d = deco.get(k);
           if(d && d.type==="mushroom"){ d.picked = true; }
         }
+      }
+      if(Array.isArray(s.shardsPicked)){
+        for(const k of s.shardsPicked){
+          const d = deco.get(k);
+          if(d && d.type==="shard"){ d.picked = true; }
+        }
+      }
+      // harpies cleared removes them
+      if(state.harpiesCleared){
+        for(const h of harpies){ h.alive = false; }
       }
       // Make opened chest non-blocking
       if(state.chestOpened){
@@ -557,6 +657,27 @@
         save();
       }
     }
+    // hit harpies
+    for(const h of harpies){
+      if(!h.alive) continue;
+      if(dist2(hx,hy, h.x, h.y) < 14*14){
+        h.hp -= 2;
+        h.hurt = 0.2;
+        beep(260,0.05,"square",0.02);
+        if(h.hp <= 0){
+          h.alive = false;
+          player.inv.feather++;
+          player.xp += 4;
+          toast("Harpy down! +1 feather, +4 XP");
+          levelCheck();
+          if(harpies.filter(x=>x.alive).length === 0){
+            state.harpiesCleared = true;
+            toast("The skies quiet down...");
+          }
+          save();
+        }
+      }
+    }
   }
 
   function levelCheck(){
@@ -580,10 +701,13 @@
       [pt.tx, pt.ty],
       [pt.tx+1, pt.ty],[pt.tx-1, pt.ty],[pt.tx, pt.ty+1],[pt.tx, pt.ty-1]
     ];
-    // mushrooms / chest
+    // mushrooms / shards / chest / beacon / forge
     for(const [x,y] of spots){
       const d = deco.get(keyXY(x,y));
       if(d && d.type==="mushroom" && !d.picked) return {type:"mushroom", x, y, d};
+      if(d && d.type==="shard" && !d.picked) return {type:"shard", x, y, d};
+      if(d && d.type==="beacon") return {type:"beacon", x, y, d};
+      if(d && d.type==="forge") return {type:"forge", x, y, d};
       if(d && d.type==="chest") return {type:"chest", x, y, d};
     }
     // npc proximity (within 1 tile)
@@ -631,6 +755,81 @@
       return;
     }
 
+    if(it.type==="shard"){
+      it.d.picked = true;
+      player.inv.shard++;
+      toast(`Sky shard collected (${player.inv.shard}).`);
+      beep(1020, 0.05, "triangle", 0.03);
+      save();
+      return;
+    }
+
+    if(it.type==="forge"){
+      const forgeDeco = it.d || deco.get(keyXY(it.x, it.y));
+      if(player.glider){
+        openDialog([
+          "The forge hums — your wind glider is complete.",
+          "Feathers swirl lazily in the updraft."
+        ]);
+        if(forgeDeco) forgeDeco.solid = true;
+        return;
+      }
+      if(!state.beaconLit){
+        openDialog([
+          "The forge is dormant.",
+          "Maybe reigniting the beacon will wake its fire."
+        ]);
+        return;
+      }
+      if(player.inv.feather >= 3 && player.inv.coin >= 8){
+        player.inv.feather -= 3;
+        player.inv.coin -= 8;
+        player.glider = true;
+        openDialog([
+          "You hammer feathers into a wind glider.",
+          "New ability: Wind Dash (K) — short burst through gusts.",
+          "Use it to dodge harpies and close gaps."
+        ], {onClose: ()=>{ toast("Wind glider crafted! Press K to dash."); save(); }});
+        beep(620,0.06,"triangle",0.03);
+        beep(980,0.06,"triangle",0.03);
+        return;
+      }
+      openDialog([
+        "Forge recipe: 3 harpy feathers + 8 coins.",
+        `You have ${player.inv.feather}/3 feathers and ${player.inv.coin} coins.`,
+        "Harpies patrol the ridges — knock them down and salvage feathers."
+      ]);
+      return;
+    }
+
+    if(it.type==="beacon"){
+      const beaconDeco = it.d || deco.get(keyXY(it.x, it.y));
+      if(state.beaconLit){
+        openDialog([
+          "The beacon hums softly, calling to distant towers.",
+          "Warmth spreads through the air."
+        ]);
+        if(beaconDeco) beaconDeco.solid = true;
+        return;
+      }
+      if(player.inv.shard >= 3){
+        player.inv.shard -= 3;
+        state.beaconLit = true;
+        openDialog([
+          "You place the shards into the bowl.",
+          "Light erupts skyward!",
+          "The island no longer feels forgotten."
+        ], {onClose: ()=>{ toast("Sky beacon rekindled!"); beep(820,0.08,"triangle",0.03); beep(1240,0.1,"triangle",0.03); save(); }});
+        if(npc.quest.state === 3) npc.quest.state = 4;
+        return;
+      }
+      openDialog([
+        "An ancient beacon, cold and quiet.",
+        "Three sky shards should wake it."
+      ]);
+      return;
+    }
+
     if(it.type==="npc"){
       // Quest flow
       if(npc.quest.state === 0){
@@ -648,13 +847,16 @@
           openDialog([
             `${npc.name}: You found them! Magnificent.`,
             "As promised — a blessing of stamina.",
-            "+2 Max HP."
+            "+2 Max HP.",
+            "",
+            "One more favor? Gather 3 sky shards",
+            "and rekindle the beacon atop the ridge."
           ], {onClose: ()=>{
             player.inv.mush -= 3;
             player.maxHp += 2;
             player.hp = Math.min(player.hp+2, player.maxHp);
-            npc.quest.state = 2;
-            toast("Quest complete!");
+            npc.quest.state = 3;
+            toast("Beacon quest started!");
             beep(880, 0.07, "triangle", 0.03);
             beep(1320, 0.07, "triangle", 0.03);
             save();
@@ -668,10 +870,61 @@
         }
         return;
       }
-      openDialog([
-        `${npc.name}: The clouds seem friendly today.`,
-        "If you hear squelching... swing first."
-      ]);
+      if(npc.quest.state === 2){
+        npc.quest.state = 3;
+        openDialog([
+          `${npc.name}: The mushrooms helped a lot.`,
+          "Could you also gather 3 sky shards?",
+          "Place them in the beacon bowl to relight it."
+        ], {onClose: ()=>{ save(); }});
+        return;
+      }
+      if(npc.quest.state === 3){
+        if(state.beaconLit){
+          npc.quest.state = 4;
+          openDialog([
+            `${npc.name}: The beacon is alive!`,
+            "But harpies circle now that the light returned.",
+            "Craft a wind glider at the forge (northwest).",
+            "Bring 3 feathers from harpies; dash with K to evade them."
+          ], {onClose: ()=>{ save(); }});
+          return;
+        }
+        openDialog([
+          `${npc.name}: The beacon bowl waits for light.`,
+          `Shards found: ${player.inv.shard}/3.`,
+          "It's up on the northern ridge."
+        ]);
+        return;
+      }
+      if(npc.quest.state === 4){
+        if(state.harpiesCleared){
+          npc.quest.state = 5;
+          openDialog([
+            `${npc.name}: The harpies fled!`,
+            "Your glider stirs the winds nicely.",
+            "Take these coins and my thanks.",
+            "+18 coins."
+          ], {onClose: ()=>{
+            player.inv.coin += 18;
+            toast("Knight reward received.");
+            save();
+          }});
+          return;
+        }
+        openDialog([
+          `${npc.name}: Harpies linger near the cliffs.`,
+          `Feathers gathered: ${player.inv.feather}/3.`,
+          "Craft the glider at the forge, then chase them off."
+        ]);
+        return;
+      }
+      if(npc.quest.state >= 5){
+        openDialog([
+          `${npc.name}: The clouds seem friendly today.`,
+          "If you hear squelching... swing first."
+        ]);
+      }
     }
   }
 
@@ -811,7 +1064,20 @@
         }
         const sx = tx*TILE - camX;
         const sy = ty*TILE - camY;
-        drawSpr(d.type, sx|0, sy|0);
+        if(d.type==="beacon" && state.beaconLit){
+          g.globalAlpha = 0.9;
+          drawSpr("beacon", sx|0, sy|0);
+          g.globalAlpha = 1;
+          // glow
+          const rad = 18 + Math.sin(state.time*3)*3;
+          const grd = g.createRadialGradient(sx+8, sy+8, 2, sx+8, sy+8, rad);
+          grd.addColorStop(0, "rgba(247,243,212,0.6)");
+          grd.addColorStop(1, "rgba(247,243,212,0)");
+          g.fillStyle = grd;
+          g.fillRect(sx-rad+8, sy-rad+8, rad*2, rad*2);
+        }else{
+          drawSpr(d.type, sx|0, sy|0);
+        }
       }
     }
 
@@ -828,6 +1094,28 @@
       g.fillRect(sx, sy-4, TILE, 2);
       g.fillStyle = "rgba(200,255,200,0.9)";
       g.fillRect(sx, sy-4, Math.floor(TILE*(slime.hp/slime.maxHp)), 2);
+    }
+
+    // Harpies
+    for(const h of harpies){
+      if(!h.alive) continue;
+      const sx = (h.x - camX - TILE/2)|0;
+      const sy = (h.y - camY - TILE/2)|0;
+      if(h.hurt>0) g.globalAlpha = 0.7;
+      drawSpr("harpy", sx, sy);
+      g.globalAlpha = 1;
+      // tiny HP bar
+      g.fillStyle = "rgba(0,0,0,0.45)";
+      g.fillRect(sx, sy-5, TILE, 2);
+      g.fillStyle = "rgba(255,244,200,0.9)";
+      g.fillRect(sx, sy-5, Math.floor(TILE*(h.hp/h.maxHp)), 2);
+    }
+
+    // Projectiles
+    for(const p of projectiles){
+      const sx = (p.x - camX - TILE/2)|0;
+      const sy = (p.y - camY - TILE/2)|0;
+      drawSpr("featherProj", sx, sy);
     }
 
     // NPC
@@ -862,7 +1150,12 @@
     if(it && !state.msg){
       g.fillStyle = "rgba(255,255,255,0.75)";
       g.font = "7px system-ui";
-      const txt = it.type==="mushroom" ? "E: pick" : it.type==="chest" ? "E: open" : "E: talk";
+      const txt = it.type==="mushroom" ? "E: pick"
+        : it.type==="shard" ? "E: pick"
+        : it.type==="chest" ? "E: open"
+        : it.type==="beacon" ? "E: ignite"
+        : it.type==="forge" ? "E: craft"
+        : "E: talk";
       g.fillText(txt, 6, VIEW_H-8);
     }
 
@@ -912,7 +1205,7 @@
     g.strokeRect(VIEW_W-86+0.5, 6.5, 80, 22);
     g.fillStyle = "rgba(234,255,255,0.95)";
     g.font = "7px system-ui";
-    g.fillText(`🍄 ${player.inv.mush}   ◇ ${player.inv.coin}`, VIEW_W-80, 20);
+    g.fillText(`🍄 ${player.inv.mush}  ✧ ${player.inv.shard}  🪽 ${player.inv.feather}  ◇ ${player.inv.coin}`, VIEW_W-80, 20);
   }
 
   function drawDialog(){
@@ -1067,6 +1360,20 @@
 
       moveWithColl(player, ax*spd*dt, ay*spd*dt);
 
+      // Wind dash (requires glider)
+      if(player.glider && pressedOnce("KeyK") && player.dashCD <= 0){
+        player.dash = DASH_TIME;
+        player.dashCD = DASH_CD;
+        beep(920,0.05,"triangle",0.025);
+      }
+
+      // apply dash movement (overrides speed)
+      if(player.dash > 0){
+        const fx = player.facing.x || 1;
+        const fy = player.facing.y || 0;
+        moveWithColl(player, fx*DASH_SPEED*dt, fy*DASH_SPEED*dt);
+      }
+
       // Attack
       if(pressedOnce("KeyJ")) tryAttack();
 
@@ -1076,6 +1383,8 @@
 
     // Cooldowns
     player.atkCD = Math.max(0, player.atkCD - dt);
+    player.dash = Math.max(0, player.dash - dt);
+    player.dashCD = Math.max(0, player.dashCD - dt);
 
     // Slime AI
     if(slime.hp > 0){
@@ -1120,6 +1429,63 @@
     }
 
     player.iCD = Math.max(0, player.iCD - dt);
+
+    // Harpy AI
+    for(const h of harpies){
+      if(!h.alive) continue;
+      h.t += dt;
+      h.hurt = Math.max(0, h.hurt - dt);
+      h.shoot = Math.max(0, h.shoot - dt);
+      const dx = player.x - h.x;
+      const dy = player.y - h.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const desire = Math.max(36, Math.min(82, dist-26));
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const drift = Math.sin(state.time*2 + h.x*0.01 + h.y*0.01)*0.35;
+      const moveX = (nx + drift) * desire * dt;
+      const moveY = (ny - drift) * desire * dt;
+      h.x += moveX;
+      h.y += moveY;
+      // shoot
+      if(h.shoot <= 0 && dist < 140){
+        projectiles.push({
+          x: h.x, y: h.y,
+          vx: nx * 110, vy: ny * 110,
+          t: 0
+        });
+        h.shoot = 1.2 + Math.random()*0.8;
+        beep(640,0.04,"square",0.02);
+      }
+    }
+
+    // Projectiles update
+    for(const p of projectiles){
+      p.t += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if(dist2(p.x,p.y, player.x,player.y) < 10*10 && player.iCD <= 0){
+        if(player.dash <= 0){
+          player.hp -= 1;
+          player.iCD = 0.9;
+          toast("Feather strike!");
+          beep(200,0.05,"sawtooth",0.03);
+          if(player.hp <= 0){
+            player.hp = player.maxHp;
+            player.x = HUB_SPAWN.x; player.y = HUB_SPAWN.y;
+            toast("You wake up back on the grass...");
+            beep(220,0.08,"triangle",0.03);
+            save();
+          }
+        }
+        p.t = 10; // mark for removal
+      }
+    }
+    // prune projectiles
+    for(let i=projectiles.length-1;i>=0;i--){
+      const p = projectiles[i];
+      if(p.t > 3) projectiles.splice(i,1);
+    }
 
     // Camera follow (smooth)
     state.cam.x = lerp(state.cam.x, player.x, 0.12);
